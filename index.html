@@ -29,6 +29,7 @@ button{cursor:pointer}button:hover{border-color:var(--acc)}
 .tabs button[aria-selected=true] .cnt{background:color-mix(in srgb,var(--acc) 20%,transparent);color:var(--acc)}
 .tools{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px}
 .tools input{flex:1;min-width:180px}
+.bh{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between;margin-bottom:12px}.bh h2{font-size:18px;margin:0;white-space:nowrap}.bh .tools{margin-bottom:0;flex:1;min-width:260px}
 .wrap{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow-x:auto}
 table{border-collapse:collapse;width:100%;min-width:640px}
 th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
@@ -46,9 +47,10 @@ tr.d>td{padding:0;background:var(--bg)}
 .tag{display:inline-block;padding:1px 9px;border-radius:99px;font-size:12px;font-weight:600;color:#fff}
 .fb{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--other);border-radius:12px;margin-bottom:20px;overflow:hidden}
 .fb .hd{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-right:18px}.fb h2{font-size:16px;margin:0;padding:14px 18px 4px}.fb p{margin:0;padding:0 18px 12px;color:var(--mute);font-size:13px}
-.fb .det{max-height:380px}.fb .det table{min-width:860px}
+.fb summary.hd{cursor:pointer;list-style:none;padding:12px 18px;user-select:none}.fb summary.hd::-webkit-details-marker{display:none}.fb summary h2{padding:0}.fb summary .meta{color:var(--mute);font-size:13px;font-variant-numeric:tabular-nums;margin-left:auto;padding-right:6px}.fb[open] summary .car{transform:rotate(90deg)}.fb[open] summary.hd{border-bottom:1px solid var(--line)}.fb .det{max-height:380px}.fb .det table{min-width:860px}
 tfoot td{font-weight:700;border-bottom:0}
 .fb tfoot td{position:sticky;bottom:0;background:var(--card);border-top:1px solid var(--line)}
+.sync{display:flex;align-items:center;justify-content:center;gap:8px;padding:7px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card);font-size:14px;font-weight:600;color:var(--billed)}
 .act{display:flex;flex-direction:column;align-items:stretch;gap:8px}
 .wm{background:#fff;width:0;min-width:100%;overflow:hidden;border:1px solid var(--line);border-radius:8px;padding:7px 0;pointer-events:none;user-select:none}
 .trk{display:inline-block;padding-left:100%;white-space:nowrap;animation:run 6s linear infinite}
@@ -65,20 +67,21 @@ tfoot td{font-weight:700;border-bottom:0}
     <h1>SIR CHIE DASHBOARD</h1>
     <div class="sub"><span class="dot" id="dot"></span><span id="stamp">Loading…</span></div>
   </div>
-  <div class="act"><div class="wm" aria-hidden="true"><div class="trk"><span>J<b class="ai">AI</b>SON</span></div></div><button id="refresh" type="button">Refresh now</button></div>
+  <div class="act"><div class="wm" aria-hidden="true"><div class="trk"><span>J<b class="ai">AI</b>SON</span></div></div><div class="sync" title="Syncs with Google Sheets automatically"><span class="dot ok"></span>Auto sync · Google Sheets</div></div>
 </header>
 
 <section class="kpis" id="kpis"></section>
 
+
+<div class="wrap" id="wrap"><div id="out" class="msg">Loading data from Google Sheets…</div></div>
+
+<div id="billing" style="margin-top:20px"><div class="bh"><h2>BILLING RECORDS</h2>
 <div class="tools">
   <input id="q" type="search" placeholder="Search partner, name, account, serial…" aria-label="Search">
   <select id="st" aria-label="Filter by status"><option value="">All statuses</option></select>
   <button type="button" id="fbx">Export CSV</button>
 </div>
-
-<div class="wrap" id="wrap"><div id="out" class="msg">Loading data from Google Sheets…</div></div>
-
-<section id="rec" style="margin-top:24px"></section>
+</div><div id="fbsec"></div></div>
 
 <script>
 /* ====== SETTINGS ====== */
@@ -116,7 +119,7 @@ function sortBy(th){
 }
 const PALETTE = ["#d98a14","#c2410c","#6d5bd0","#2b7bb9","#a23b72","#7a8b2d"];
 
-let fbSort = {k:"partner",dir:1}, detSort = {k:null,dir:1}, tab = "partners", hasComp = false, hasTag = false, fbExport = [], rows = [], lastHash = "", sortKey = "count", sortDir = -1, openSet = new Set();
+let fbSort = {k:"partner",dir:1}, detSort = {k:null,dir:1}, tab = "partners", hasComp = false, hasTag = false, fbExport = [], rows = [], lastHash = "", sortKey = "count", sortDir = -1, openSet = new Set(), fbOpen = new Set(["all"]);
 
 function parseCSV(t){
   const out = []; let r = [], f = "", q = false;
@@ -241,19 +244,19 @@ function render(){
     [tot.count ? (fbRows.length/tot.count*100).toFixed(1) + "%" : "0%", "For billing"], [peso(tot.amount), "Amount paid"], [peso(tot.fee), "Admin fee"]
   ].map(([v,l]) => `<div class="kpi"><b>${v}</b><span>${l}</span></div>`).join("");
 
-  if (!parts.length){ $("out").className = "msg"; $("out").innerHTML = "No records match your filters."; $("rec").innerHTML = ""; return; }
-  $("out").className = "";
+  (() => {
+    if (!data.length){ $("fbsec").innerHTML = ""; return; }
+    const list = sortRows(data, fbSort);
+    const a = list.reduce((x,r) => x + r.amount, 0), fe = list.reduce((x,r) => x + r.fee, 0);
+    const label = f || "All statuses";
+    $("fbsec").innerHTML = `<details class="fb" data-st="all" ${fbOpen.has("all") ? "open" : ""} style="border-left-color:${f ? colors[f] : "var(--acc)"}"><summary class="hd"><span class="car">▸</span><h2>${esc(label)} (${fmt(list.length)})</h2><span class="meta">${peso(a)}</span></summary>` +
+      `<div class="det"><table><thead><tr>${H("fb","partner","Partner")}${H("fb","date","Date")}${H("fb","name","Name")}${H("fb","acct","Account no.")}${H("fb","serial","Serial no.")}${H("fb","amount","Amount","n")}${H("fb","ref","Ref no.")}${H("fb","retailer","Retailer")}${H("fb","dealer","Dealer")}${H("fb","status","Status")}${hasComp?H("fb","compliance","Compliance"):""}${hasTag?H("fb","tagging","Tagging"):""}${H("fb","fee","Fee","n")}</tr></thead><tbody>` +
+      list.map(r => `<tr><td>${esc(r.partner)}</td><td>${esc(r.date)}</td><td>${esc(r.name)}</td><td>${esc(r.acct)}</td><td>${esc(r.serial)}</td><td class="n">${fmt(r.amount)}</td><td>${esc(r.ref)}</td><td>${esc(r.retailer)}</td><td>${esc(r.dealer)}</td><td><span class="tag" style="background:${colors[r.status]}">${esc(r.status)}</span></td>${hasComp?`<td>${esc(r.compliance)}</td>`:""}${hasTag?`<td>${esc(r.tagging)}</td>`:""}<td class="n">${fmt(r.fee)}</td></tr>`).join("") +
+      `</tbody><tfoot><tr><td>Total</td><td></td><td></td><td></td><td></td><td class="n">${peso(a)}</td><td></td><td></td><td></td><td></td>${hasComp?"<td></td>":""}${hasTag?"<td></td>":""}<td class="n">${peso(fe)}</td></tr></tfoot></table></div></details>`;
+  })();
 
-  {
-    const recs = sortRows(data, fbSort);
-    const stSummary = statuses.filter(s => tot.st[s]).map(s => `<span class="tag" style="background:${colors[s]}">${esc(s)}: ${fmt(tot.st[s])}</span>`).join(" ");
-    let t = `<h2 style="font-size:18px;margin:0 0 10px">Billing records <span style="color:var(--mute);font-weight:400;font-size:14px">(${fmt(recs.length)})</span></h2>` +
-      `<div class="wrap"><div style="padding:12px 14px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;border-bottom:1px solid var(--line)"><b>All statuses</b> ${stSummary}</div>` +
-      `<table style="min-width:1100px"><thead><tr>${H("fb","partner","Partner")}${H("fb","date","Date")}${H("fb","name","Name")}${H("fb","acct","Account no.")}${H("fb","serial","Serial no.")}${H("fb","amount","Amount","n")}${H("fb","ref","Ref no.")}${H("fb","retailer","Retailer")}${H("fb","dealer","Dealer")}${H("fb","status","Status")}${hasComp?H("fb","compliance","Compliance"):""}${hasTag?H("fb","tagging","Tagging"):""}${H("fb","fee","Fee","n")}</tr></thead><tbody>` +
-      recs.map(r => `<tr><td>${esc(r.partner)}</td><td>${esc(r.date)}</td><td>${esc(r.name)}</td><td>${esc(r.acct)}</td><td>${esc(r.serial)}</td><td class="n">${fmt(r.amount)}</td><td>${esc(r.ref)}</td><td>${esc(r.retailer)}</td><td>${esc(r.dealer)}</td><td><span class="tag" style="background:${colors[r.status]}">${esc(r.status)}</span></td>${hasComp?`<td>${esc(r.compliance)}</td>`:""}${hasTag?`<td>${esc(r.tagging)}</td>`:""}<td class="n">${fmt(r.fee)}</td></tr>`).join("") +
-      `</tbody><tfoot><tr><td>Total (${fmt(recs.length)})</td><td></td><td></td><td></td><td></td><td class="n">${peso(tot.amount)}</td><td></td><td></td><td></td><td></td>${hasComp?"<td></td>":""}${hasTag?"<td></td>":""}<td class="n">${peso(tot.fee)}</td></tr></tfoot></table></div>`;
-    $("rec").innerHTML = t;
-  }
+  if (!parts.length){ $("out").className = "msg"; $("out").innerHTML = "No records match your filters."; return; }
+  $("out").className = "";
 
   const arrow = k => sortKey === k ? (sortDir > 0 ? " ▲" : " ▼") : "";
   const th = (k, label, cls="") => `<th class="${cls}" data-k="${esc(k)}">${esc(label)}${arrow(k)}</th>`;
@@ -278,9 +281,6 @@ function render(){
   $("out").innerHTML = h;
 }
 
-$("rec").addEventListener("click", e => {
-  const hs = e.target.closest("th[data-s]"); if (hs) sortBy(hs);
-});
 $("out").addEventListener("click", e => {
   const hs = e.target.closest("th[data-s]"); if (hs) return sortBy(hs);
   const t = e.target.closest("th[data-k]");
@@ -288,6 +288,8 @@ $("out").addEventListener("click", e => {
   const r = e.target.closest("tr.p");
   if (r){ const p = r.dataset.p; openSet.has(p) ? openSet.delete(p) : openSet.add(p); render(); }
 });
+$("fbsec").addEventListener("toggle", e => { const d = e.target; if (d.dataset && d.dataset.st !== undefined) d.open ? fbOpen.add(d.dataset.st) : fbOpen.delete(d.dataset.st); }, true);
+$("fbsec").addEventListener("click", e => { const hs = e.target.closest("th[data-s]"); if (hs) sortBy(hs); });
 function exportFB(){
   const head = ["Partner","Activation Date","Name","Account Number","Serial Number","Amount Paid","Ref Number","Activated By","Retailer","Dealer","Status","Admin Fee"].concat(hasComp ? ["Compliance"] : []).concat(hasTag ? ["Tagging"] : []);
   const q = v => '"' + String(v ?? "").replace(/"/g, '""') + '"';
@@ -303,7 +305,6 @@ function exportFB(){
 $("fbx").addEventListener("click", exportFB);
 $("q").addEventListener("input", render);
 $("st").addEventListener("change", render);
-$("refresh").addEventListener("click", () => load(true));
 document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
 
 load(true);
