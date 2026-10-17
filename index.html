@@ -70,11 +70,6 @@ tfoot td{font-weight:700;border-bottom:0}
 
 <section class="kpis" id="kpis"></section>
 
-<div class="tabs" id="tabs" role="tablist">
-  <button type="button" role="tab" data-tab="partners" aria-selected="true">Partners <span class="cnt" id="cntP">0</span></button>
-  <button type="button" role="tab" data-tab="records" aria-selected="false">Billing records <span class="cnt" id="cntR">0</span></button>
-</div>
-
 <div class="tools">
   <input id="q" type="search" placeholder="Search partner, name, account, serial…" aria-label="Search">
   <select id="st" aria-label="Filter by status"><option value="">All statuses</option></select>
@@ -82,6 +77,8 @@ tfoot td{font-weight:700;border-bottom:0}
 </div>
 
 <div class="wrap" id="wrap"><div id="out" class="msg">Loading data from Google Sheets…</div></div>
+
+<section id="rec" style="margin-top:24px"></section>
 
 <script>
 /* ====== SETTINGS ====== */
@@ -244,21 +241,18 @@ function render(){
     [tot.count ? (fbRows.length/tot.count*100).toFixed(1) + "%" : "0%", "For billing"], [peso(tot.amount), "Amount paid"], [peso(tot.fee), "Admin fee"]
   ].map(([v,l]) => `<div class="kpi"><b>${v}</b><span>${l}</span></div>`).join("");
 
-  $("cntP").textContent = fmt(parts.length); $("cntR").textContent = fmt(data.length);
-  document.querySelectorAll("#tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === tab));
-
-  if (!parts.length){ $("out").className = "msg"; $("out").innerHTML = "No records match your filters."; return; }
+  if (!parts.length){ $("out").className = "msg"; $("out").innerHTML = "No records match your filters."; $("rec").innerHTML = ""; return; }
   $("out").className = "";
 
-  if (tab === "records"){
+  {
     const recs = sortRows(data, fbSort);
     const stSummary = statuses.filter(s => tot.st[s]).map(s => `<span class="tag" style="background:${colors[s]}">${esc(s)}: ${fmt(tot.st[s])}</span>`).join(" ");
-    let t = `<div style="padding:12px 14px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;border-bottom:1px solid var(--line)"><b>All statuses</b> ${stSummary}</div>` +
+    let t = `<h2 style="font-size:18px;margin:0 0 10px">Billing records <span style="color:var(--mute);font-weight:400;font-size:14px">(${fmt(recs.length)})</span></h2>` +
+      `<div class="wrap"><div style="padding:12px 14px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;border-bottom:1px solid var(--line)"><b>All statuses</b> ${stSummary}</div>` +
       `<table style="min-width:1100px"><thead><tr>${H("fb","partner","Partner")}${H("fb","date","Date")}${H("fb","name","Name")}${H("fb","acct","Account no.")}${H("fb","serial","Serial no.")}${H("fb","amount","Amount","n")}${H("fb","ref","Ref no.")}${H("fb","retailer","Retailer")}${H("fb","dealer","Dealer")}${H("fb","status","Status")}${hasComp?H("fb","compliance","Compliance"):""}${hasTag?H("fb","tagging","Tagging"):""}${H("fb","fee","Fee","n")}</tr></thead><tbody>` +
       recs.map(r => `<tr><td>${esc(r.partner)}</td><td>${esc(r.date)}</td><td>${esc(r.name)}</td><td>${esc(r.acct)}</td><td>${esc(r.serial)}</td><td class="n">${fmt(r.amount)}</td><td>${esc(r.ref)}</td><td>${esc(r.retailer)}</td><td>${esc(r.dealer)}</td><td><span class="tag" style="background:${colors[r.status]}">${esc(r.status)}</span></td>${hasComp?`<td>${esc(r.compliance)}</td>`:""}${hasTag?`<td>${esc(r.tagging)}</td>`:""}<td class="n">${fmt(r.fee)}</td></tr>`).join("") +
-      `</tbody><tfoot><tr><td>Total (${fmt(recs.length)})</td><td></td><td></td><td></td><td></td><td class="n">${peso(tot.amount)}</td><td></td><td></td><td></td><td></td>${hasComp?"<td></td>":""}${hasTag?"<td></td>":""}<td class="n">${peso(tot.fee)}</td></tr></tfoot></table>`;
-    $("out").innerHTML = t;
-    return;
+      `</tbody><tfoot><tr><td>Total (${fmt(recs.length)})</td><td></td><td></td><td></td><td></td><td class="n">${peso(tot.amount)}</td><td></td><td></td><td></td><td></td>${hasComp?"<td></td>":""}${hasTag?"<td></td>":""}<td class="n">${peso(tot.fee)}</td></tr></tfoot></table></div>`;
+    $("rec").innerHTML = t;
   }
 
   const arrow = k => sortKey === k ? (sortDir > 0 ? " ▲" : " ▼") : "";
@@ -284,9 +278,8 @@ function render(){
   $("out").innerHTML = h;
 }
 
-$("tabs").addEventListener("click", e => {
-  const b = e.target.closest("button[data-tab]"); if (!b) return;
-  tab = b.dataset.tab; render();
+$("rec").addEventListener("click", e => {
+  const hs = e.target.closest("th[data-s]"); if (hs) sortBy(hs);
 });
 $("out").addEventListener("click", e => {
   const hs = e.target.closest("th[data-s]"); if (hs) return sortBy(hs);
