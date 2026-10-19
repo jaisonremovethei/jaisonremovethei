@@ -97,7 +97,7 @@ const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;
 const FB = /for\s*billing/i;
 const WC = /^(with\s*compliance|complied|compliant)$/i;
 const isComp = r => WC.test((r.compliance || r.status || "").trim());
-const NUM = new Set(["amount","fee","date"]);
+const NUM = new Set(["amount","fee","sli","date"]);
 function parseDate(t, dmy){
   const p = String(t).split("/").map(Number);
   if (p.length !== 3 || p.some(isNaN)) return 0;
@@ -119,7 +119,7 @@ function sortBy(th){
 }
 const PALETTE = ["#d98a14","#c2410c","#6d5bd0","#2b7bb9","#a23b72","#7a8b2d"];
 
-let fbSort = {k:"partner",dir:1}, detSort = {k:null,dir:1}, tab = "partners", hasComp = false, hasTag = false, fbExport = [], rows = [], lastHash = "", sortKey = "count", sortDir = -1, openSet = new Set(), fbOpen = new Set(["all"]);
+let fbSort = {k:"partner",dir:1}, detSort = {k:null,dir:1}, tab = "partners", hasComp = false, hasTag = false, hasSli = false, fbExport = [], rows = [], lastHash = "", sortKey = "count", sortDir = -1, openSet = new Set(), fbOpen = new Set(["all"]);
 
 function parseCSV(t){
   const out = []; let r = [], f = "", q = false;
@@ -143,6 +143,8 @@ function toRecords(grid){
   hasTag = tagIdx >= 0;
   const compIdx = hr ? hr.findIndex(x => /compliance/i.test(String(x))) : -1;
   hasComp = compIdx >= 0;
+  const sliIdx = hr ? hr.findIndex(x => /\bsli\b/i.test(String(x))) : -1;
+  hasSli = sliIdx >= 0;
   const add = (c, o) => {
     const name = (c[o+1] || "").trim(), partner = (c[o+9] || "").trim();
     if (!name && !partner) return;
@@ -154,7 +156,8 @@ function toRecords(grid){
       compliance: compIdx >= 0 ? String(c[compIdx] || "").trim() : "",
       tagging: tagIdx >= 0 ? String(c[tagIdx] || "").trim() : "",
       partner:partner || "(No partner)", status:(c[o+10]||"").trim() || "(Blank)",
-      fee:parseFloat(String(c[o+11]||"").replace(/[^0-9.\-]/g,""))||0
+      fee:parseFloat(String(c[o+11]||"").replace(/[^0-9.\-]/g,""))||0,
+      sli: sliIdx >= 0 ? (parseFloat(String(c[sliIdx]||"").replace(/[^0-9.\-]/g,""))||0) : 0
     });
   };
   grid.forEach(c => { add(c, 0); if (c.length > 14) add(c, 13); });
@@ -215,11 +218,11 @@ function render(){
   const map = new Map();
   data.forEach(r => {
     const k = r.partner.toUpperCase();
-    if (!map.has(k)) map.set(k, {name:r.partner, billed:0, cw:0, count:0, amount:0, fee:0, st:{}, items:[]});
+    if (!map.has(k)) map.set(k, {name:r.partner, billed:0, cw:0, count:0, amount:0, fee:0, sli:0, st:{}, items:[]});
     const p = map.get(k);
     if (/^billed$/i.test(r.status)) p.billed++;
     if (isComp(r)) p.cw++;
-    p.count++; p.amount += r.amount; p.fee += r.fee; p.st[r.status] = (p.st[r.status]||0) + 1; p.items.push(r);
+    p.count++; p.amount += r.amount; p.fee += r.fee; p.sli += r.sli; p.st[r.status] = (p.st[r.status]||0) + 1; p.items.push(r);
   });
   const parts = [...map.values()];
   parts.forEach(p => p.comp = p.count ? p.cw / p.count * 100 : 0);
@@ -230,8 +233,8 @@ function render(){
     return (av > bv ? 1 : av < bv ? -1 : 0) * sortDir;
   });
 
-  const tot = {cw:data.filter(isComp).length, count:data.length, amount:0, fee:0, st:{}};
-  data.forEach(r => { tot.amount += r.amount; tot.fee += r.fee; tot.st[r.status] = (tot.st[r.status]||0) + 1; });
+  const tot = {cw:data.filter(isComp).length, count:data.length, amount:0, fee:0, sli:0, st:{}};
+  data.forEach(r => { tot.amount += r.amount; tot.fee += r.fee; tot.sli += r.sli; tot.st[r.status] = (tot.st[r.status]||0) + 1; });
   const billed = Object.entries(tot.st).filter(([s]) => /^billed$/i.test(s)).reduce((a,[,n]) => a+n, 0);
 
   const fbRows = sortRows(data.filter(r => FB.test(r.status)), fbSort);
@@ -241,18 +244,18 @@ function render(){
   $("kpis").innerHTML = [
     [fmt(parts.length), "Partners"], [fmt(tot.count), "Records"],
     [tot.count ? (billed/tot.count*100).toFixed(1) + "%" : "0%", "Billed"], [tot.count ? (tot.cw/tot.count*100).toFixed(1) + "%" : "0%", "With compliance"],
-    [tot.count ? (fbRows.length/tot.count*100).toFixed(1) + "%" : "0%", "For billing"], [peso(tot.amount), "Amount paid"], [peso(tot.fee), "Admin fee"]
+    [tot.count ? (fbRows.length/tot.count*100).toFixed(1) + "%" : "0%", "For billing"], [peso(tot.amount), "Amount paid"], ...(hasSli ? [[peso(tot.sli), "SLI fee"]] : []), [peso(tot.fee), "Admin fee"]
   ].map(([v,l]) => `<div class="kpi"><b>${v}</b><span>${l}</span></div>`).join("");
 
   (() => {
     if (!data.length){ $("fbsec").innerHTML = ""; return; }
     const list = sortRows(data, fbSort);
-    const a = list.reduce((x,r) => x + r.amount, 0), fe = list.reduce((x,r) => x + r.fee, 0);
+    const a = list.reduce((x,r) => x + r.amount, 0), fe = list.reduce((x,r) => x + r.fee, 0), sl = list.reduce((x,r) => x + r.sli, 0);
     const label = f || "All statuses";
     $("fbsec").innerHTML = `<details class="fb" data-st="all" ${fbOpen.has("all") ? "open" : ""} style="border-left-color:${f ? colors[f] : "var(--acc)"}"><summary class="hd"><span class="car">▸</span><h2>${esc(label)} (${fmt(list.length)})</h2><span class="meta">${peso(a)}</span></summary>` +
-      `<div class="det"><table><thead><tr>${H("fb","partner","Partner")}${H("fb","date","Date")}${H("fb","name","Name")}${H("fb","acct","Account no.")}${H("fb","serial","Serial no.")}${H("fb","amount","Amount","n")}${H("fb","ref","Ref no.")}${H("fb","retailer","Retailer")}${H("fb","dealer","Dealer")}${H("fb","status","Status")}${hasComp?H("fb","compliance","Compliance"):""}${hasTag?H("fb","tagging","Tagging"):""}${H("fb","fee","Fee","n")}</tr></thead><tbody>` +
-      list.map(r => `<tr><td>${esc(r.partner)}</td><td>${esc(r.date)}</td><td>${esc(r.name)}</td><td>${esc(r.acct)}</td><td>${esc(r.serial)}</td><td class="n">${fmt(r.amount)}</td><td>${esc(r.ref)}</td><td>${esc(r.retailer)}</td><td>${esc(r.dealer)}</td><td><span class="tag" style="background:${colors[r.status]}">${esc(r.status)}</span></td>${hasComp?`<td>${esc(r.compliance)}</td>`:""}${hasTag?`<td>${esc(r.tagging)}</td>`:""}<td class="n">${fmt(r.fee)}</td></tr>`).join("") +
-      `</tbody><tfoot><tr><td>Total</td><td></td><td></td><td></td><td></td><td class="n">${peso(a)}</td><td></td><td></td><td></td><td></td>${hasComp?"<td></td>":""}${hasTag?"<td></td>":""}<td class="n">${peso(fe)}</td></tr></tfoot></table></div></details>`;
+      `<div class="det"><table><thead><tr>${H("fb","partner","Partner")}${H("fb","date","Date")}${H("fb","name","Name")}${H("fb","acct","Account no.")}${H("fb","serial","Serial no.")}${H("fb","amount","Amount","n")}${hasSli?H("fb","sli","SLI fee","n"):""}${H("fb","fee","Admin fee","n")}${H("fb","ref","Ref no.")}${H("fb","retailer","Retailer")}${H("fb","dealer","Dealer")}${H("fb","status","Status")}${hasComp?H("fb","compliance","Compliance"):""}${hasTag?H("fb","tagging","Tagging"):""}</tr></thead><tbody>` +
+      list.map(r => `<tr><td>${esc(r.partner)}</td><td>${esc(r.date)}</td><td>${esc(r.name)}</td><td>${esc(r.acct)}</td><td>${esc(r.serial)}</td><td class="n">${fmt(r.amount)}</td>${hasSli?`<td class="n">${fmt(r.sli)}</td>`:""}<td class="n">${fmt(r.fee)}</td><td>${esc(r.ref)}</td><td>${esc(r.retailer)}</td><td>${esc(r.dealer)}</td><td><span class="tag" style="background:${colors[r.status]}">${esc(r.status)}</span></td>${hasComp?`<td>${esc(r.compliance)}</td>`:""}${hasTag?`<td>${esc(r.tagging)}</td>`:""}</tr>`).join("") +
+      `</tbody><tfoot><tr><td>Total</td><td></td><td></td><td></td><td></td><td class="n">${peso(a)}</td>${hasSli?`<td class="n">${peso(sl)}</td>`:""}<td class="n">${peso(fe)}</td><td></td><td></td><td></td><td></td>${hasComp?"<td></td>":""}${hasTag?"<td></td>":""}</tr></tfoot></table></div></details>`;
   })();
 
   if (!parts.length){ $("out").className = "msg"; $("out").innerHTML = "No records match your filters."; return; }
@@ -262,22 +265,22 @@ function render(){
   const th = (k, label, cls="") => `<th class="${cls}" data-k="${esc(k)}">${esc(label)}${arrow(k)}</th>`;
   let h = `<table><thead><tr>${th("name","Partner")}${th("count","Records","n")}` +
     statuses.map(s => th("s:"+s, s, "n")).join("") +
-    `${th("amount","Amount paid","n")}${th("fee","Admin fee","n")}${th("comp","Compliance","n")}</tr></thead><tbody>`;
+    `${th("amount","Amount paid","n")}${hasSli?th("sli","SLI fee","n"):""}${th("fee","Admin fee","n")}${th("comp","Compliance","n")}</tr></thead><tbody>`;
   parts.forEach(p => {
     const open = openSet.has(p.name);
     h += `<tr class="p ${open?"open":""}" data-p="${esc(p.name)}"><td><span class="car">▸</span>${esc(p.name)}</td><td class="n">${fmt(p.count)}</td>` +
       statuses.map(s => `<td class="n">${p.st[s] ? fmt(p.st[s]) : "–"}</td>`).join("") +
-      `<td class="n">${peso(p.amount)}</td><td class="n">${peso(p.fee)}</td>` +
+      `<td class="n">${peso(p.amount)}</td>${hasSli?`<td class="n">${peso(p.sli)}</td>`:""}<td class="n">${peso(p.fee)}</td>` +
       `<td class="n" style="font-weight:700;color:var(--${p.comp>=90?"billed":p.comp>=70?"other":"bad"})">${p.comp.toFixed(1)}%</td></tr>`;
     if (open){
-      h += `<tr class="d"><td colspan="${statuses.length+5}"><div class="det"><table><thead><tr>${H("d","date","Date")}${H("d","name","Name")}${H("d","acct","Account no.")}${H("d","serial","Serial no.")}${H("d","amount","Amount","n")}${H("d","ref","Ref no.")}${H("d","retailer","Retailer")}${H("d","dealer","Dealer")}${H("d","status","Status")}${hasComp?H("d","compliance","Compliance"):""}${hasTag?H("d","tagging","Tagging"):""}${H("d","fee","Fee","n")}</tr></thead><tbody>` +
-        sortRows(p.items, detSort).map(r => `<tr><td>${esc(r.date)}</td><td>${esc(r.name)}</td><td>${esc(r.acct)}</td><td>${esc(r.serial)}</td><td class="n">${fmt(r.amount)}</td><td>${esc(r.ref)}</td><td>${esc(r.retailer)}</td><td>${esc(r.dealer)}</td><td><span class="tag" style="background:${colors[r.status]}">${esc(r.status)}</span></td>${hasComp?`<td>${esc(r.compliance)}</td>`:""}${hasTag?`<td>${esc(r.tagging)}</td>`:""}<td class="n">${fmt(r.fee)}</td></tr>`).join("") +
+      h += `<tr class="d"><td colspan="${statuses.length+5+(hasSli?1:0)}"><div class="det"><table><thead><tr>${H("d","date","Date")}${H("d","name","Name")}${H("d","acct","Account no.")}${H("d","serial","Serial no.")}${H("d","amount","Amount","n")}${hasSli?H("d","sli","SLI fee","n"):""}${H("d","fee","Admin fee","n")}${H("d","ref","Ref no.")}${H("d","retailer","Retailer")}${H("d","dealer","Dealer")}${H("d","status","Status")}${hasComp?H("d","compliance","Compliance"):""}${hasTag?H("d","tagging","Tagging"):""}</tr></thead><tbody>` +
+        sortRows(p.items, detSort).map(r => `<tr><td>${esc(r.date)}</td><td>${esc(r.name)}</td><td>${esc(r.acct)}</td><td>${esc(r.serial)}</td><td class="n">${fmt(r.amount)}</td>${hasSli?`<td class="n">${fmt(r.sli)}</td>`:""}<td class="n">${fmt(r.fee)}</td><td>${esc(r.ref)}</td><td>${esc(r.retailer)}</td><td>${esc(r.dealer)}</td><td><span class="tag" style="background:${colors[r.status]}">${esc(r.status)}</span></td>${hasComp?`<td>${esc(r.compliance)}</td>`:""}${hasTag?`<td>${esc(r.tagging)}</td>`:""}</tr>`).join("") +
         `</tbody></table></div></td></tr>`;
     }
   });
   h += `</tbody><tfoot><tr><td>Total</td><td class="n">${fmt(tot.count)}</td>` +
     statuses.map(s => `<td class="n">${tot.st[s] ? fmt(tot.st[s]) : "–"}</td>`).join("") +
-    `<td class="n">${peso(tot.amount)}</td><td class="n">${peso(tot.fee)}</td><td class="n">${tot.count ? (tot.cw/tot.count*100).toFixed(1) : "0.0"}%</td></tr></tfoot></table>`;
+    `<td class="n">${peso(tot.amount)}</td>${hasSli?`<td class="n">${peso(tot.sli)}</td>`:""}<td class="n">${peso(tot.fee)}</td><td class="n">${tot.count ? (tot.cw/tot.count*100).toFixed(1) : "0.0"}%</td></tr></tfoot></table>`;
   $("out").innerHTML = h;
 }
 
@@ -291,10 +294,10 @@ $("out").addEventListener("click", e => {
 $("fbsec").addEventListener("toggle", e => { const d = e.target; if (d.dataset && d.dataset.st !== undefined) d.open ? fbOpen.add(d.dataset.st) : fbOpen.delete(d.dataset.st); }, true);
 $("fbsec").addEventListener("click", e => { const hs = e.target.closest("th[data-s]"); if (hs) sortBy(hs); });
 function exportFB(){
-  const head = ["Partner","Activation Date","Name","Account Number","Serial Number","Amount Paid","Ref Number","Activated By","Retailer","Dealer","Status","Admin Fee"].concat(hasComp ? ["Compliance"] : []).concat(hasTag ? ["Tagging"] : []);
+  const head = ["Partner","Activation Date","Name","Account Number","Serial Number","Amount Paid","Ref Number","Activated By","Retailer","Dealer","Status","Admin Fee"].concat(hasComp ? ["Compliance"] : []).concat(hasTag ? ["Tagging"] : []).concat(hasSli ? ["SLI Fee"] : []);
   const q = v => '"' + String(v ?? "").replace(/"/g, '""') + '"';
   const lines = [head.map(q).join(",")].concat(fbExport.map(r =>
-    [r.partner,r.date,r.name,r.acct,r.serial,r.amount,r.ref,r.by,r.retailer,r.dealer,r.status,r.fee].concat(hasComp ? [r.compliance] : []).concat(hasTag ? [r.tagging] : []).map(q).join(",")));
+    [r.partner,r.date,r.name,r.acct,r.serial,r.amount,r.ref,r.by,r.retailer,r.dealer,r.status,r.fee].concat(hasComp ? [r.compliance] : []).concat(hasTag ? [r.tagging] : []).concat(hasSli ? [r.sli] : []).map(q).join(",")));
   const blob = new Blob(["\ufeff" + lines.join("\r\n")], {type:"text/csv;charset=utf-8"});
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
