@@ -84,6 +84,8 @@ h1{font-size:clamp(16px,2vw,20px)}
 .fb summary.hd{padding:7px 14px}
 .fb summary h2{font-size:14px}
 .fb summary.hd{justify-content:flex-start;gap:10px;flex-wrap:wrap}
+.more{padding:10px;text-align:center;color:var(--mute);font-size:12.5px}
+.more button{padding:3px 12px;font-size:12.5px}
 @media (max-width:700px){.wrap{max-height:none}}
 </style>
 </head>
@@ -103,7 +105,7 @@ h1{font-size:clamp(16px,2vw,20px)}
 
 <div id="billing" style="margin-top:20px"><div class="bh"><h2>BILLING RECORDS</h2>
 <div class="tools">
-  <input id="q" type="search" placeholder="Search partner, JO number, account number…" aria-label="Search">
+  <input id="q" type="search" placeholder="Search partner, JO number, account number (3+ characters)…" aria-label="Search">
   <select id="st" aria-label="Filter by status"><option value="">All statuses</option></select>
   <button type="button" id="fbx">Export CSV</button>
 </div>
@@ -124,6 +126,7 @@ const FB = /for\s*billing/i;
 const WC = /^(with\s*compliance|complied|compliant)$/i;
 const isComp = r => WC.test((r.compliance || r.status || "").trim());
 const NUM = new Set(["amount","fee","sli","date"]);
+const COL = new Intl.Collator(undefined,{numeric:true});
 function parseDate(t, dmy){
   const p = String(t).split("/").map(Number);
   if (p.length !== 3 || p.some(isNaN)) return 0;
@@ -134,7 +137,7 @@ function sortRows(arr, st){
   const g = r => st.k === "date" ? r.ts : NUM.has(st.k) ? r[st.k] : String(r[st.k] || "").toLowerCase();
   return arr.slice().sort((a,b) => {
     const x = g(a), y = g(b);
-    return (typeof x === "number" ? x - y : x.localeCompare(y, undefined, {numeric:true})) * st.dir;
+    return (typeof x === "number" ? x - y : COL.compare(x, y)) * st.dir;
   });
 }
 const H = (t,k,l,c="") => { const st = t === "fb" ? fbSort : detSort; return `<th class="${c}" data-t="${t}" data-s="${k}">${l}${st.k === k ? (st.dir > 0 ? " ▲" : " ▼") : ""}</th>`; };
@@ -145,7 +148,7 @@ function sortBy(th){
 }
 const PALETTE = ["#d98a14","#c2410c","#6d5bd0","#2b7bb9","#a23b72","#7a8b2d"];
 
-let fbSort = {k:"partner",dir:1}, detSort = {k:null,dir:1}, tab = "partners", hasComp = false, hasTag = false, hasSli = false, fbExport = [], rows = [], lastHash = "", sortKey = "count", sortDir = -1, openSet = new Set(), fbOpen = new Set(["all"]);
+let fbSort = {k:"partner",dir:1}, detSort = {k:null,dir:1}, tab = "partners", hasComp = false, hasTag = false, hasSli = false, curData = [], rows = [], lastHash = "", sortKey = "count", sortDir = -1, openSet = new Set(), fbOpen = new Set(["all"]);
 
 function parseCSV(t){
   const out = []; let r = [], f = "", q = false;
@@ -232,12 +235,33 @@ function statusColors(list){
   return m;
 }
 
+const PAGE = 150;
+let billList = [], billShown = 0, billColors = {};
+function billRow(r){
+  return `<tr><td>${esc(r.partner)}</td><td>${esc(r.date)}</td><td>${esc(r.name)}</td><td>${esc(r.acct)}</td><td>${esc(r.serial)}</td><td class="n">${fmt(r.amount)}</td>${hasSli?`<td class="n">${fmt(r.sli)}</td>`:""}<td class="n">${fmt(r.fee)}</td><td>${esc(r.ref)}</td><td>${esc(r.retailer)}</td><td>${esc(r.dealer)}</td><td><span class="tag" style="background:${billColors[r.status]}">${esc(r.status)}</span></td>${hasComp?`<td>${esc(r.compliance)}</td>`:""}${hasTag?`<td>${esc(r.tagging)}</td>`:""}</tr>`;
+}
+function updateMore(){
+  const m = $("more"); if (!m) return;
+  m.innerHTML = billShown < billList.length
+    ? `Showing ${fmt(billShown)} of ${fmt(billList.length)} · <button type="button" id="moreBtn">Show more</button>`
+    : `Showing all ${fmt(billList.length)} records`;
+}
+function loadMore(){
+  const tb = document.querySelector("#fbsec tbody");
+  if (tb && billShown < billList.length){
+    const next = billList.slice(billShown, billShown + PAGE);
+    tb.insertAdjacentHTML("beforeend", next.map(billRow).join(""));
+    billShown += next.length;
+  }
+  updateMore();
+}
+
 function render(){
   const statuses = [...new Set(rows.map(r => r.status))].sort((a,b) => (/^billed$/i.test(b)) - (/^billed$/i.test(a)) || FB.test(b) - FB.test(a) || a.localeCompare(b));
   const sel = $("st"), cur = sel.value;
   sel.innerHTML = '<option value="">All statuses</option>' + statuses.map(s => `<option ${s===cur?"selected":""}>${esc(s)}</option>`).join("");
   const colors = statusColors(statuses);
-  const q = $("q").value.trim().toLowerCase(), f = sel.value;
+  const qraw = $("q").value.trim().toLowerCase(), q = qraw.length >= 3 ? qraw : "", f = sel.value;
 
   const data = rows.filter(r => (!f || r.status === f) &&
     (!q || r.hay.includes(q)));
@@ -264,9 +288,8 @@ function render(){
   data.forEach(r => { tot.amount += r.amount; tot.fee += r.fee; tot.sli += r.sli; tot.st[r.status] = (tot.st[r.status]||0) + 1; });
   const billed = Object.entries(tot.st).filter(([s]) => /^billed$/i.test(s)).reduce((a,[,n]) => a+n, 0);
 
-  const fbRows = sortRows(data.filter(r => FB.test(r.status)), fbSort);
-  const fbAmt = fbRows.reduce((a,r) => a + r.amount, 0), fbFee = fbRows.reduce((a,r) => a + r.fee, 0);
-  fbExport = data.slice().sort((x,y)=>x.partner.localeCompare(y.partner));
+  const fbRows = data.filter(r => FB.test(r.status));
+  curData = data;
 
   $("kpis").innerHTML = [
     [fmt(parts.length), "Partners"], [fmt(tot.count), "Records"],
@@ -275,14 +298,12 @@ function render(){
   ].map(([v,l]) => `<div class="kpi"><b>${v}</b><span>${l}</span></div>`).join("");
 
   (() => {
-    if (!data.length){ $("fbsec").innerHTML = ""; return; }
-    const list = sortRows(data, fbSort);
-    const a = list.reduce((x,r) => x + r.amount, 0), fe = list.reduce((x,r) => x + r.fee, 0), sl = list.reduce((x,r) => x + r.sli, 0);
+    if (!data.length){ $("fbsec").innerHTML = ""; billList = []; return; }
+    billList = sortRows(data, fbSort); billShown = 0; billColors = colors;
     const label = f || "All statuses";
-    $("fbsec").innerHTML = `<details class="fb" data-st="all" ${fbOpen.has("all") ? "open" : ""} style="border-left-color:${f ? colors[f] : "var(--acc)"}"><summary class="hd"><span class="car">▸</span><h2>${esc(label)} (${fmt(list.length)})</h2></summary>` +
-      `<div class="det"><table><thead><tr>${H("fb","partner","Partner")}${H("fb","date","Date")}${H("fb","name","Name")}${H("fb","acct","Account no.")}${H("fb","serial","Serial no.")}${H("fb","amount","Amount","n")}${hasSli?H("fb","sli","SLI fee","n"):""}${H("fb","fee","Admin fee","n")}${H("fb","ref","Ref no.")}${H("fb","retailer","Retailer")}${H("fb","dealer","Dealer")}${H("fb","status","Status")}${hasComp?H("fb","compliance","Compliance"):""}${hasTag?H("fb","tagging","Tagging"):""}</tr></thead><tbody>` +
-      list.map(r => `<tr><td>${esc(r.partner)}</td><td>${esc(r.date)}</td><td>${esc(r.name)}</td><td>${esc(r.acct)}</td><td>${esc(r.serial)}</td><td class="n">${fmt(r.amount)}</td>${hasSli?`<td class="n">${fmt(r.sli)}</td>`:""}<td class="n">${fmt(r.fee)}</td><td>${esc(r.ref)}</td><td>${esc(r.retailer)}</td><td>${esc(r.dealer)}</td><td><span class="tag" style="background:${colors[r.status]}">${esc(r.status)}</span></td>${hasComp?`<td>${esc(r.compliance)}</td>`:""}${hasTag?`<td>${esc(r.tagging)}</td>`:""}</tr>`).join("") +
-      `</tbody></table></div></details>`;
+    $("fbsec").innerHTML = `<details class="fb" data-st="all" ${fbOpen.has("all") ? "open" : ""} style="border-left-color:${f ? colors[f] : "var(--acc)"}"><summary class="hd"><span class="car">▸</span><h2>${esc(label)} (${fmt(billList.length)})</h2></summary>` +
+      `<div class="det"><table><thead><tr>${H("fb","partner","Partner")}${H("fb","date","Date")}${H("fb","name","Name")}${H("fb","acct","Account no.")}${H("fb","serial","Serial no.")}${H("fb","amount","Amount","n")}${hasSli?H("fb","sli","SLI fee","n"):""}${H("fb","fee","Admin fee","n")}${H("fb","ref","Ref no.")}${H("fb","retailer","Retailer")}${H("fb","dealer","Dealer")}${H("fb","status","Status")}${hasComp?H("fb","compliance","Compliance"):""}${hasTag?H("fb","tagging","Tagging"):""}</tr></thead><tbody></tbody></table><div class="more" id="more"></div></div></details>`;
+    loadMore();
   })();
 
   if (!parts.length){ $("out").className = "msg"; $("out").innerHTML = "No records match your filters."; return; }
@@ -327,11 +348,12 @@ function fitBilling(){
 }
 window.addEventListener("resize", fitBilling);
 $("fbsec").addEventListener("toggle", e => { requestAnimationFrame(fitBilling); const d = e.target; if (d.dataset && d.dataset.st !== undefined) d.open ? fbOpen.add(d.dataset.st) : fbOpen.delete(d.dataset.st); }, true);
-$("fbsec").addEventListener("click", e => { const hs = e.target.closest("th[data-s]"); if (hs) sortBy(hs); });
+$("fbsec").addEventListener("click", e => { if (e.target.closest("#moreBtn")) return loadMore(); const hs = e.target.closest("th[data-s]"); if (hs) sortBy(hs); });
+$("fbsec").addEventListener("scroll", e => { const d = e.target; if (d.classList && d.classList.contains("det") && d.scrollTop + d.clientHeight >= d.scrollHeight - 400) loadMore(); }, true);
 function exportFB(){
   const head = ["Partner","Activation Date","Name","Account Number","Serial Number","Amount Paid","Ref Number","Activated By","Retailer","Dealer","Status","Admin Fee"].concat(hasComp ? ["Compliance"] : []).concat(hasTag ? ["Tagging"] : []).concat(hasSli ? ["SLI Fee"] : []);
   const q = v => '"' + String(v ?? "").replace(/"/g, '""') + '"';
-  const lines = [head.map(q).join(",")].concat(fbExport.map(r =>
+  const lines = [head.map(q).join(",")].concat(curData.slice().sort((x,y) => COL.compare(x.partner, y.partner)).map(r =>
     [r.partner,r.date,r.name,r.acct,r.serial,r.amount,r.ref,r.by,r.retailer,r.dealer,r.status,r.fee].concat(hasComp ? [r.compliance] : []).concat(hasTag ? [r.tagging] : []).concat(hasSli ? [r.sli] : []).map(q).join(",")));
   const blob = new Blob(["\ufeff" + lines.join("\r\n")], {type:"text/csv;charset=utf-8"});
   const a = document.createElement("a");
@@ -341,7 +363,8 @@ function exportFB(){
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 $("fbx").addEventListener("click", exportFB);
-let qt; $("q").addEventListener("input", () => { clearTimeout(qt); qt = setTimeout(render, 250); });
+let qt; $("q").addEventListener("input", () => { clearTimeout(qt); qt = setTimeout(render, 400); });
+$("q").addEventListener("keydown", e => { if (e.key === "Enter"){ clearTimeout(qt); render(); } });
 $("st").addEventListener("change", render);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
 
